@@ -40,6 +40,50 @@ Use these local credentials:
 - Password: value of `POSTGRES_PASSWORD`
 - Database: value of `POSTGRES_DB`
 
+## OCI Deployment
+
+The production compose file is intended to run behind host-level Caddy:
+
+```caddy
+thebridge.hsh-server.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+Create `.env` manually on the OCI instance. Do not commit it:
+
+```env
+PROJECT_NAME="The Bridge Backend"
+SECRET_KEY=<strong-random-secret>
+
+POSTGRES_USER=<db-user>
+POSTGRES_PASSWORD=<strong-db-password>
+POSTGRES_DB=<db-name>
+
+FIRST_SUPERUSER=<admin-email>
+FIRST_SUPERUSER_PASSWORD=<strong-admin-password>
+
+BACKEND_CORS_ORIGINS=["https://thebridge.hsh-server.com"]
+WEB_CONCURRENCY=2
+```
+
+First deploy:
+
+```bash
+docker compose -f compose.prod.yml up -d --build
+```
+
+Deploy after pulling updates:
+
+```bash
+git pull --ff-only
+docker compose -f compose.prod.yml up -d --build
+docker compose -f compose.prod.yml logs -f backend
+```
+
+The production stack excludes Adminer and binds the backend only to
+`127.0.0.1:8000`, so OCI security rules should expose only SSH, HTTP, and HTTPS.
+
 ## Local Development
 
 Install dependencies:
