@@ -221,7 +221,12 @@ def send_message(
     ).all()
     history = list(reversed(recent_logs))
 
-    assistant_text = gemini.chat(history, message_in.message)
+    # [방어벽 1] AI 채팅 자체가 실패할 경우 예외 처리
+    try:
+        assistant_text = gemini.chat(history, message_in.message)
+    except Exception as e:
+        print(f"❌ Gemini Chat API 오류 (429 등): {e}")
+        assistant_text = "죄송합니다. 현재 AI 서버의 일시적인 요청 초과로 답변이 어렵습니다. 잠시 후 다시 시도해 주세요!"
 
     user_log = ChatLog(user_id=current_user.id, role="user", message=message_in.message)
     assistant_log = ChatLog(user_id=current_user.id, role="assistant", message=assistant_text)
@@ -229,69 +234,78 @@ def send_message(
     session.add(assistant_log)
     session.flush()
 
-    all_logs = history + [user_log, assistant_log]
-    recent_summary = gemini.generate_recent_summary(all_logs)
-
-    prefs = session.exec(
-        select(UserPreferences).where(UserPreferences.user_id == current_user.id)
-    ).first()
-
-    recent_emb = gemini.generate_embedding(recent_summary)
-
-    if prefs is None:
-        core_summary = recent_summary
-        core_emb = recent_emb
-        prefs = UserPreferences(
-            user_id=current_user.id,
-            recent_summary=recent_summary,
-            recent_embedding=recent_emb,
-            core_summary=core_summary,
-            core_embedding=core_emb,
-        )
-        session.add(prefs)
-    else:
-        prefs.recent_summary = recent_summary
-        prefs.recent_embedding = recent_emb
-        if prefs.core_summary is None:
-            prefs.core_summary = recent_summary
-            prefs.core_embedding = recent_emb
-        else:
-            prefs.core_summary = gemini.merge_summaries(prefs.core_summary, recent_summary)
-            prefs.core_embedding = gemini.generate_embedding(prefs.core_summary)
-        prefs.updated_at = get_datetime_utc()
-        session.add(prefs)
-
-    # Flush to persist embeddings before querying recommendations
-    session.flush()
-
     recommendations: list[GatheringRecommendPublic] | None = None
-    if prefs.core_embedding is not None and prefs.recent_embedding is not None:
-        user_vec = compute_weighted_embedding(prefs.core_embedding, prefs.recent_embedding)
-        summary = prefs.core_summary or prefs.recent_summary or ""
-        preferred_sports = gemini.extract_preferred_sports(summary)
-        distance_col = Gathering.description_embedding.cosine_distance(user_vec).label("distance")
-        stmt = (
-            select(Gathering, distance_col)
-            .where(Gathering.description_embedding.isnot(None))
-            .where(Gathering.status == 0)
-            .where(Gathering.host_id != current_user.id)
-        )
-        if current_user.lat is not None and current_user.lng is not None:
-            stmt = stmt.where(haversine_km(current_user.lat, current_user.lng) <= 2.0)
-        rows = session.exec(stmt.order_by(distance_col.asc()).limit(3)).all()
-        if rows:
-            recs = []
-            for g, dist in rows:
-                base = round((1 - dist) * 100, 1)
-                if preferred_sports and g.sport_type not in preferred_sports:
-                    base = round(base * 0.5, 1)
-                recs.append(
-                    GatheringRecommendPublic(
-                        **GatheringPublic.model_validate(g).model_dump(),
-                        match_percentage=base,
+
+    # [방어벽 2] 요약, 임베딩, 추천 로직 전체를 try-except로 격리
+    # 이 안에서 429가 터지더라도 추천 리스트만 안 나갈 뿐, 유저 채팅 프로세스는 성공(200)해야 합니다.
+    try:
+        all_logs = history + [user_log, assistant_log]
+        recent_summary = gemini.generate_recent_summary(all_logs)
+
+        prefs = session.exec(
+            select(UserPreferences).where(UserPreferences.user_id == current_user.id)
+        ).first()
+
+        recent_emb = gemini.generate_embedding(recent_summary)
+
+        if prefs is None:
+            core_summary = recent_summary
+            core_emb = recent_emb
+            prefs = UserPreferences(
+                user_id=current_user.id,
+                recent_summary=recent_summary,
+                recent_embedding=recent_emb,
+                core_summary=core_summary,
+                core_embedding=core_emb,
+            )
+            session.add(prefs)
+        else:
+            prefs.recent_summary = recent_summary
+            prefs.recent_embedding = recent_emb
+            if prefs.core_summary is None:
+                prefs.core_summary = recent_summary
+                prefs.core_embedding = recent_emb
+            else:
+                prefs.core_summary = gemini.merge_summaries(prefs.core_summary, recent_summary)
+                prefs.core_embedding = gemini.generate_embedding(prefs.core_summary)
+            prefs.updated_at = get_datetime_utc()
+            session.add(prefs)
+
+        session.flush()
+
+        # 추천 모임 쿼리 실행
+        if prefs.core_embedding is not None and prefs.recent_embedding is not None:
+            user_vec = compute_weighted_embedding(prefs.core_embedding, prefs.recent_embedding)
+            summary = prefs.core_summary or prefs.recent_summary or ""
+            preferred_sports = gemini.extract_preferred_sports(summary)
+            distance_col = Gathering.description_embedding.cosine_distance(user_vec).label("distance")
+            stmt = (
+                select(Gathering, distance_col)
+                .where(Gathering.description_embedding.isnot(None))
+                .where(Gathering.status == 0)
+                .where(Gathering.host_id != current_user.id)
+            )
+            if current_user.lat is not None and current_user.lng is not None:
+                stmt = stmt.where(haversine_km(current_user.lat, current_user.lng) <= 2.0)
+            rows = session.exec(stmt.order_by(distance_col.asc()).limit(3)).all()
+            if rows:
+                recs = []
+                for g, dist in rows:
+                    base = round((1 - dist) * 100, 1)
+                    if preferred_sports and g.sport_type not in preferred_sports:
+                        base = round(base * 0.5, 1)
+                    recs.append(
+                        GatheringRecommendPublic(
+                            **GatheringPublic.model_validate(g).model_dump(),
+                            match_percentage=base,
+                        )
                     )
-                )
-            recommendations = recs
+                recommendations = recs
+
+    except Exception as e:
+        # 429나 기타 AI 인프라 에러 발생 시 로그만 찍고 스무스하게 넘어감
+        print(f"⚠️ 요약 및 추천 임베딩 처리 중 에러 발생 (스킵 처리): {e}")
+        # 임베딩 갱신에 실패했으므로 recommendations는 None 상태로 리턴됨
 
     session.commit()
     session.refresh(assistant_log)
@@ -299,29 +313,3 @@ def send_message(
         message=ChatMessagePublic.model_validate(assistant_log),
         recommendations=recommendations,
     )
-
-
-@router.get("/history", response_model=ChatHistoryPublic)
-def get_chat_history(
-    session: SessionDep,
-    current_user: CurrentUser,
-) -> Any:
-    logs = session.exec(
-        select(ChatLog)
-        .where(ChatLog.user_id == current_user.id)
-        .order_by(col(ChatLog.created_at).asc())
-    ).all()
-    return ChatHistoryPublic(data=[ChatMessagePublic.model_validate(log) for log in logs])
-
-
-@router.get("/preferences", response_model=UserPreferencesPublic)
-def get_preferences(
-    session: SessionDep,
-    current_user: CurrentUser,
-) -> Any:
-    prefs = session.exec(
-        select(UserPreferences).where(UserPreferences.user_id == current_user.id)
-    ).first()
-    if not prefs:
-        raise HTTPException(status_code=404, detail="No preferences found. Start a chat first.")
-    return UserPreferencesPublic.model_validate(prefs)

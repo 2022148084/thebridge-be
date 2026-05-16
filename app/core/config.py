@@ -63,6 +63,7 @@ class Settings(BaseSettings):
 
     GEMINI_API_KEY: str = ""
     GEMINI_RPM_LIMIT: int = 500
+    GEMINI_MIN_REQUEST_INTERVAL_SECONDS: float = 0.1
     REDIS_URL: str = "redis://localhost:6379/0"
 
 
