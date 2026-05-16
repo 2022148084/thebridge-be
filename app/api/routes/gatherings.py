@@ -12,6 +12,8 @@ from app.models import (
     GatheringsPublic,
     GatheringUpdate,
     Message,
+    Participant,
+    ParticipantPublic,
     get_datetime_utc,
 )
 
@@ -106,3 +108,77 @@ def delete_gathering(
     session.delete(gathering)
     session.commit()
     return Message(message="Gathering deleted successfully")
+
+
+@router.post("/{gathering_id}/participants", response_model=ParticipantPublic, status_code=201)
+def join_gathering(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    gathering_id: uuid.UUID,
+) -> Any:
+    gathering = session.get(Gathering, gathering_id)
+    if not gathering:
+        raise HTTPException(status_code=404, detail="Gathering not found")
+
+    if gathering.host_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Host cannot join their own gathering")
+
+    if gathering.status != 0:
+        raise HTTPException(status_code=400, detail="Gathering is not open")
+
+    existing = session.exec(
+        select(Participant).where(
+            Participant.session_id == gathering_id,
+            Participant.user_id == current_user.id,
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Already a participant in this gathering")
+
+    active_count = session.exec(
+        select(func.count()).select_from(Participant).where(
+            Participant.session_id == gathering_id,
+            col(Participant.status).in_(["pending", "joined"]),
+        )
+    ).one()
+    if active_count >= gathering.max_participants:
+        raise HTTPException(status_code=409, detail="Gathering is full")
+
+    participant = Participant(
+        session_id=gathering_id,
+        user_id=current_user.id,
+        status="pending",
+    )
+    session.add(participant)
+    session.commit()
+    session.refresh(participant)
+    return ParticipantPublic.model_validate(participant)
+
+
+@router.delete("/{gathering_id}/participants/me")
+def cancel_join_gathering(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    gathering_id: uuid.UUID,
+) -> Message:
+    gathering = session.get(Gathering, gathering_id)
+    if not gathering:
+        raise HTTPException(status_code=404, detail="Gathering not found")
+
+    participant = session.exec(
+        select(Participant).where(
+            Participant.session_id == gathering_id,
+            Participant.user_id == current_user.id,
+        )
+    ).first()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participation not found")
+
+    if participant.status == "joined" and gathering.status != 0:
+        raise HTTPException(status_code=400, detail="Cannot cancel after gathering has started or closed")
+
+    session.delete(participant)
+    session.commit()
+    return Message(message="Participation cancelled successfully")

@@ -229,6 +229,14 @@ class Participant(SQLModel, table=True):
     )
 
 
+class ParticipantPublic(SQLModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    user_id: uuid.UUID
+    status: str
+    joined_at: datetime | None
+
+
 class MatchScore(SQLModel, table=True):
     __tablename__ = "match_score"
 
