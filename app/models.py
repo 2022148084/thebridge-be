@@ -23,6 +23,7 @@ class UserBase(SQLModel):
     age: int | None = None
     sex: int | None = Field(default=None, ge=0, le=2)
     city: str | None = Field(default=None, max_length=255)
+    avatar_index: int | None = Field(default=None, ge=0)
 
 
 # Properties to receive via API on creation
@@ -37,6 +38,7 @@ class UserRegister(SQLModel):
     age: int | None = None
     sex: int | None = Field(default=None, ge=0, le=2)
     city: str | None = Field(default=None, max_length=255)
+    avatar_index: int | None = Field(default=None, ge=0)
 
 
 # Properties to receive via API on update, all are optional
@@ -51,6 +53,7 @@ class UserUpdateMe(SQLModel):
     age: int | None = None
     sex: int | None = Field(default=None, ge=0, le=2)
     city: str | None = Field(default=None, max_length=255)
+    avatar_index: int | None = Field(default=None, ge=0)
 
 
 class UpdatePassword(SQLModel):
