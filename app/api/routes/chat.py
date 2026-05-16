@@ -125,6 +125,37 @@ async def gathering_chat_websocket(
     gathering_id: uuid.UUID,
     token: str | None = None,
 ) -> None:
+    # ===== 디버깅 로그 시작 =====
+    print(f"\n========== WS 연결 테스트 ==========")
+    print(f"1. 요청된 모임 ID: {gathering_id}")
+    if token:
+        print(f"2. 요청된 토큰: {token[:15]}... (생략)")
+    else:
+        print("2. 토큰이 아예 전달되지 않음!!")
+
+    try:
+        user = await run_in_threadpool(_get_websocket_user, token)
+        print(f"3. 인증된 유저: {user}")
+    except Exception as e:
+        print(f"3. 유저 인증 중 에러 발생: {e}")
+        user = None
+
+    try:
+        gathering_exists = await run_in_threadpool(_gathering_exists, gathering_id)
+        print(f"4. 모임 DB 확인 결과: {gathering_exists}")
+    except Exception as e:
+        print(f"4. 모임 확인 중 에러 발생: {e}")
+        gathering_exists = False
+    print(f"=====================================\n")
+    # ===== 디버깅 로그 끝 =====
+    if user is None or not gathering_exists:
+        print("❌ 유저가 없거나 모임이 없어서 강제 종료합니다 (403 반환)")
+        await websocket.close(code=_WS_CLOSE_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+    print("✅ 웹소켓 연결 성공! Redis 구독 시작")
+    
     user = await run_in_threadpool(_get_websocket_user, token)
     gathering_exists = await run_in_threadpool(_gathering_exists, gathering_id)
     if user is None or not gathering_exists:
