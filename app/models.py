@@ -2,12 +2,12 @@ import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from pydantic import EmailStr
+from pydantic import EmailStr, field_validator
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, Relationship, SQLModel
+from typing import Literal
 
 VECTOR_DIM = 1536
-
 
 def get_datetime_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -191,12 +191,15 @@ class Gathering(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     host_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
-    location_id: uuid.UUID = Field(foreign_key="location.id", nullable=False, ondelete="CASCADE")
+    place_name: str = Field(max_length=255)
+    city: str = Field(max_length=50)
+    lat: float
+    lng: float
     sport_type: str = Field(max_length=100)
     starts_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
     duration_min: int
     max_participants: int
-    level: str = Field(max_length=50)
+    level: int
     vibe: str = Field(max_length=100)
     description: str | None = None
     description_embedding: list[float] | None = Field(
@@ -251,3 +254,88 @@ class Review(SQLModel, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+
+
+# ── Gathering API schemas ──────────────────────────────────────────────────────
+
+SportType = Literal[
+    "running", "cycling", "yoga", "stretching", "dancing", "walking", "hiking"
+]
+VibeTag = Literal["quiet pace", "social energy", "locked in", "reset mode"]
+
+
+class GatheringBase(SQLModel):
+    place_name: str = Field(max_length=255)
+    city: str = Field(max_length=50)
+    lat: float
+    lng: float
+    sport_type: SportType
+    starts_at: datetime
+    duration_min: int = Field(gt=0)
+    max_participants: int = Field(gt=0)
+    level: int = Field(ge=1, le=5)
+    vibe: list[VibeTag]
+    description: str | None = None
+    status: int = Field(default=0, ge=0, le=2)
+
+
+class GatheringCreate(GatheringBase):
+    @field_validator("vibe")
+    @classmethod
+    def vibe_no_duplicates(cls, v: list[str]) -> list[str]:
+        if len(v) != len(set(v)):
+            raise ValueError("vibe tags must be unique")
+        return v
+
+
+class GatheringUpdate(SQLModel):
+    place_name: str | None = Field(default=None, max_length=255)
+    city: str | None = Field(default=None, max_length=50)
+    lat: float | None = None
+    lng: float | None = None
+    sport_type: SportType | None = None
+    starts_at: datetime | None = None
+    duration_min: int | None = Field(default=None, gt=0)
+    max_participants: int | None = Field(default=None, gt=0)
+    level: int | None = Field(default=None, ge=1, le=5)
+    vibe: list[VibeTag] | None = None
+    description: str | None = None
+    status: int | None = Field(default=None, ge=0, le=2)
+
+    @field_validator("vibe")
+    @classmethod
+    def vibe_no_duplicates(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and len(v) != len(set(v)):
+            raise ValueError("vibe tags must be unique")
+        return v
+
+
+class GatheringPublic(SQLModel):
+    id: uuid.UUID
+    host_id: uuid.UUID
+    place_name: str
+    city: str
+    lat: float
+    lng: float
+    sport_type: str
+    starts_at: datetime
+    duration_min: int
+    max_participants: int
+    level: int
+    vibe: list[str]
+    description: str | None
+    status: int
+    created_at: datetime | None
+    updated_at: datetime | None
+
+    @field_validator("vibe", mode="before")
+    @classmethod
+    def parse_vibe(cls, v: str | list[str]) -> list[str]:
+        if isinstance(v, str):
+            return [x for x in v.split(",") if x]
+        return v
+
+
+class GatheringsPublic(SQLModel):
+    data: list[GatheringPublic]
+    count: int
