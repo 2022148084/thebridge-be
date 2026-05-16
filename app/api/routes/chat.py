@@ -162,7 +162,6 @@ async def gathering_chat_websocket(
         await websocket.close(code=_WS_CLOSE_POLICY_VIOLATION)
         return
 
-    await websocket.accept()
 
     redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     pubsub = redis.pubsub()
