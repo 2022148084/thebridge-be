@@ -9,19 +9,90 @@ from app.models import (
     Gathering,
     GatheringCreate,
     GatheringPublic,
+    GatheringRecommendPublic,
     GatheringsPublic,
+    GatheringsRecommendPublic,
     GatheringUpdate,
     Message,
     Participant,
     ParticipantPublic,
+    UserPreferences,
     get_datetime_utc,
 )
+from app.services import gemini
+from app.services.gemini import compute_weighted_embedding
 
 router = APIRouter(prefix="/gatherings", tags=["gatherings"])
 
 
 def _to_public(g: Gathering) -> GatheringPublic:
     return GatheringPublic.model_validate(g)
+
+
+def _refresh_description_and_embedding(g: Gathering) -> tuple[str, list[float]]:
+    vibe = g.vibe if isinstance(g.vibe, str) else ",".join(g.vibe or [])
+    desc = gemini.generate_gathering_description(
+        city=g.city,
+        place_name=g.place_name,
+        sport_type=g.sport_type,
+        level=g.level,
+        vibe=vibe,
+        duration_min=g.duration_min,
+        max_participants=g.max_participants,
+        user_description=g.description,
+    )
+    return desc, gemini.generate_embedding(desc)
+
+
+def _recommend_rows(
+    session: Any,
+    user_vec: list[float],
+    exclude_host_id: uuid.UUID,
+    limit: int,
+    preferred_sports: list[str] | None = None,
+) -> list[GatheringRecommendPublic]:
+    distance_col = Gathering.description_embedding.cosine_distance(user_vec).label("distance")
+    rows = session.exec(
+        select(Gathering, distance_col)
+        .where(Gathering.description_embedding.isnot(None))
+        .where(Gathering.status == 0)
+        .where(Gathering.host_id != exclude_host_id)
+        .order_by(distance_col.asc())
+        .limit(limit)
+    ).all()
+    result = []
+    for g, dist in rows:
+        base = round((1 - dist) * 100, 1)
+        if preferred_sports and g.sport_type not in preferred_sports:
+            base = round(base * 0.5, 1)
+        result.append(
+            GatheringRecommendPublic(
+                **GatheringPublic.model_validate(g).model_dump(),
+                match_percentage=base,
+            )
+        )
+    return result
+
+
+@router.get("/recommended", response_model=GatheringsRecommendPublic)
+def get_recommended_gatherings(
+    session: SessionDep,
+    current_user: CurrentUser,
+    limit: int = 10,
+) -> Any:
+    prefs = session.exec(
+        select(UserPreferences).where(UserPreferences.user_id == current_user.id)
+    ).first()
+    if not prefs or prefs.core_embedding is None or prefs.recent_embedding is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No preference embeddings found. Complete the chat survey first.",
+        )
+    user_vec = compute_weighted_embedding(prefs.core_embedding, prefs.recent_embedding)
+    summary = prefs.core_summary or prefs.recent_summary or ""
+    preferred_sports = gemini.extract_preferred_sports(summary)
+    data = _recommend_rows(session, user_vec, current_user.id, limit, preferred_sports)
+    return GatheringsRecommendPublic(data=data, count=len(data))
 
 
 @router.get("/", response_model=GatheringsPublic)
@@ -68,6 +139,9 @@ def create_gathering(
     gathering = Gathering.model_validate(
         gathering_in, update={"host_id": current_user.id, "vibe": vibe_str}
     )
+    desc, emb = _refresh_description_and_embedding(gathering)
+    gathering.description = desc
+    gathering.description_embedding = emb
     session.add(gathering)
     session.commit()
     session.refresh(gathering)
@@ -87,11 +161,19 @@ def update_gathering(
         raise HTTPException(status_code=404, detail="Gathering not found")
     if not current_user.is_superuser and gathering.host_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not enough permissions")
+    _EMBED_TRIGGER_FIELDS = {
+        "sport_type", "level", "vibe", "duration_min",
+        "max_participants", "city", "place_name", "description",
+    }
     update_data = gathering_in.model_dump(exclude_unset=True)
     if "vibe" in update_data and update_data["vibe"] is not None:
         update_data["vibe"] = ",".join(update_data["vibe"])
     update_data["updated_at"] = get_datetime_utc()
     gathering.sqlmodel_update(update_data)
+    if update_data.keys() & _EMBED_TRIGGER_FIELDS:
+        desc, emb = _refresh_description_and_embedding(gathering)
+        gathering.description = desc
+        gathering.description_embedding = emb
     session.add(gathering)
     session.commit()
     session.refresh(gathering)

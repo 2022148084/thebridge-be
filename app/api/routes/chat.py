@@ -9,18 +9,23 @@ from app.models import (
     ChatLog,
     ChatMessageInput,
     ChatMessagePublic,
+    ChatResponse,
+    Gathering,
+    GatheringPublic,
+    GatheringRecommendPublic,
     UserPreferences,
     UserPreferencesPublic,
     get_datetime_utc,
 )
 from app.services import gemini
+from app.services.gemini import compute_weighted_embedding
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 _HISTORY_LIMIT = 20
 
 
-@router.post("/", response_model=ChatMessagePublic)
+@router.post("/", response_model=ChatResponse)
 def send_message(
     *,
     session: SessionDep,
@@ -50,25 +55,68 @@ def send_message(
         select(UserPreferences).where(UserPreferences.user_id == current_user.id)
     ).first()
 
+    recent_emb = gemini.generate_embedding(recent_summary)
+
     if prefs is None:
+        core_summary = recent_summary
+        core_emb = recent_emb
         prefs = UserPreferences(
             user_id=current_user.id,
             recent_summary=recent_summary,
-            core_summary=recent_summary,
+            recent_embedding=recent_emb,
+            core_summary=core_summary,
+            core_embedding=core_emb,
         )
         session.add(prefs)
     else:
         prefs.recent_summary = recent_summary
+        prefs.recent_embedding = recent_emb
         if prefs.core_summary is None:
             prefs.core_summary = recent_summary
+            prefs.core_embedding = recent_emb
         else:
             prefs.core_summary = gemini.merge_summaries(prefs.core_summary, recent_summary)
+            prefs.core_embedding = gemini.generate_embedding(prefs.core_summary)
         prefs.updated_at = get_datetime_utc()
         session.add(prefs)
 
+    # Flush to persist embeddings before querying recommendations
+    session.flush()
+
+    recommendations: list[GatheringRecommendPublic] | None = None
+    if prefs.core_embedding is not None and prefs.recent_embedding is not None:
+        user_vec = compute_weighted_embedding(prefs.core_embedding, prefs.recent_embedding)
+        summary = prefs.core_summary or prefs.recent_summary or ""
+        preferred_sports = gemini.extract_preferred_sports(summary)
+        distance_col = Gathering.description_embedding.cosine_distance(user_vec).label("distance")
+        rows = session.exec(
+            select(Gathering, distance_col)
+            .where(Gathering.description_embedding.isnot(None))
+            .where(Gathering.status == 0)
+            .where(Gathering.host_id != current_user.id)
+            .order_by(distance_col.asc())
+            .limit(3)
+        ).all()
+        if rows:
+            recs = []
+            for g, dist in rows:
+                base = round((1 - dist) * 100, 1)
+                if preferred_sports and g.sport_type not in preferred_sports:
+                    base = round(base * 0.5, 1)
+                recs.append(
+                    GatheringRecommendPublic(
+                        **GatheringPublic.model_validate(g).model_dump(),
+                        match_percentage=base,
+                    )
+                )
+            recommendations = recs
+
     session.commit()
     session.refresh(assistant_log)
-    return ChatMessagePublic.model_validate(assistant_log)
+    return ChatResponse(
+        message=ChatMessagePublic.model_validate(assistant_log),
+        recommendations=recommendations,
+    )
 
 
 @router.get("/history", response_model=ChatHistoryPublic)

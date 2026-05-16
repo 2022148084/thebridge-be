@@ -1,41 +1,44 @@
+import math
+
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
 from app.models import ChatLog
 
-SYSTEM_PROMPT = """당신은 운동 친구 매칭 서비스 'The Bridge'의 AI 상담사입니다.
-사용자와 친근하게 대화하며 운동 취향을 파악하세요.
+_EMBED_MODEL = "gemini-embedding-2"
 
-파악해야 할 항목:
-- 좋아하는 운동 종류 (러닝, 사이클링, 요가, 스트레칭, 댄스, 걷기, 하이킹 중 선택)
-- 운동 강도 (1~5단계, 1=매우 가볍게 ~ 5=매우 강하게)
-- 선호하는 분위기 (조용한 페이스 / 소셜 에너지 / 집중 모드 / 회복 모드)
-- 운동 빈도 및 선호 시간대
+SYSTEM_PROMPT = """You are an AI assistant for 'WBOND', a workout buddy matching service.
+Chat naturally with the user to learn about their exercise preferences.
 
-모든 대화는 한국어로 자연스럽고 친근하게 진행하세요.
-정보를 한 번에 묻지 말고 대화 흐름에 맞게 자연스럽게 파악하세요."""
+Topics to discover:
+- Preferred workout types (running, cycling, yoga, stretching, dancing, walking, hiking)
+- Intensity level (1–5, where 1 = very light and 5 = very intense)
+- Preferred atmosphere (quiet pace / social energy / locked in / reset mode)
+- Workout frequency and preferred time of day
 
-SUMMARY_PROMPT_TEMPLATE = """다음 대화에서 사용자의 운동 취향을 파악하여 간결하게 요약해줘.
-포함할 내용: 좋아하는 운동 종류, 운동 강도, 선호 분위기, 운동 빈도/시간대.
-아직 파악되지 않은 항목은 생략해도 됨. 2~4문장으로 요약.
+Always respond in English in a friendly, conversational tone.
+Do not ask about all topics at once — discover them naturally through the conversation."""
 
-대화:
+SUMMARY_PROMPT_TEMPLATE = """Based on the following conversation, write a concise summary of the user's workout preferences.
+Include: preferred workout types, intensity level, preferred atmosphere, frequency and time of day.
+Omit any topics not yet discussed. Write 2–4 sentences.
+
+Conversation:
 {conversation}
 
-요약:"""
+Summary:"""
 
-MERGE_PROMPT_TEMPLATE = """사용자의 운동 취향 요약 두 가지를 하나로 통합해줘.
-최신 정보가 있으면 최신 것을 우선으로 하되, 두 요약을 모두 반영해 종합적인 요약을 만들어줘.
-2~4문장으로 작성.
+MERGE_PROMPT_TEMPLATE = """Merge the following two workout preference summaries into one.
+Prioritize the latest information, but incorporate both. Write 2–4 sentences.
 
-기존 요약:
+Existing summary:
 {core}
 
-최신 요약:
+Latest summary:
 {recent}
 
-통합 요약:"""
+Merged summary:"""
 
 _MODEL = "gemini-2.5-flash"
 
@@ -65,7 +68,7 @@ def chat(history: list[ChatLog], user_message: str) -> str:
 def generate_recent_summary(messages: list[ChatLog]) -> str:
     client = _client()
     conversation = "\n".join(
-        f"{'사용자' if m.role == 'user' else 'AI'}: {m.message}"
+        f"{'User' if m.role == 'user' else 'Assistant'}: {m.message}"
         for m in messages
     )
     prompt = SUMMARY_PROMPT_TEMPLATE.format(conversation=conversation)
@@ -78,3 +81,71 @@ def merge_summaries(core: str, recent: str) -> str:
     prompt = MERGE_PROMPT_TEMPLATE.format(core=core, recent=recent)
     response = client.models.generate_content(model=_MODEL, contents=prompt)
     return (response.text or "").strip()
+
+
+GATHERING_DESC_PROMPT = """Write a concise 2-3 sentence description for a workout gathering with the following attributes:
+- Location: {city} ({place_name})
+- Sport: {sport_type}
+- Intensity level: {level} out of 5
+- Vibe: {vibe}
+- Duration: {duration_min} minutes
+- Max participants: {max_participants}
+{user_desc_line}
+Write in English. Focus on the experience and atmosphere."""
+
+
+def generate_gathering_description(
+    city: str,
+    place_name: str,
+    sport_type: str,
+    level: int,
+    vibe: str,
+    duration_min: int,
+    max_participants: int,
+    user_description: str | None = None,
+) -> str:
+    client = _client()
+    user_desc_line = f"- Additional context: {user_description}" if user_description else ""
+    prompt = GATHERING_DESC_PROMPT.format(
+        city=city,
+        place_name=place_name,
+        sport_type=sport_type,
+        level=level,
+        vibe=vibe,
+        duration_min=duration_min,
+        max_participants=max_participants,
+        user_desc_line=user_desc_line,
+    )
+    response = client.models.generate_content(model=_MODEL, contents=prompt)
+    return (response.text or "").strip()
+
+
+def generate_embedding(text: str) -> list[float]:
+    client = _client()
+    result = client.models.embed_content(
+        model=_EMBED_MODEL,
+        contents=text,
+    )
+    return list(result.embeddings[0].values)
+
+
+_SPORT_TYPES = {"running", "cycling", "yoga", "stretching", "dancing", "walking", "hiking"}
+
+
+def extract_preferred_sports(summary: str) -> list[str]:
+    text = summary.lower()
+    return [s for s in _SPORT_TYPES if s in text]
+
+
+def compute_weighted_embedding(
+    core_emb: list[float],
+    recent_emb: list[float],
+    core_weight: float = 0.4,
+    recent_weight: float = 0.6,
+) -> list[float]:
+    weighted = [
+        core_weight * c + recent_weight * r
+        for c, r in zip(core_emb, recent_emb)
+    ]
+    norm = math.sqrt(sum(x * x for x in weighted))
+    return [x / norm for x in weighted] if norm > 0 else weighted

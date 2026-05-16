@@ -7,7 +7,7 @@ from pydantic import EmailStr, field_validator
 from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
-VECTOR_DIM = 1536
+VECTOR_DIM = 3072  # gemini-embedding-exp-03-07 default output dimension
 
 
 def get_datetime_utc() -> datetime:
@@ -341,6 +341,11 @@ class GatheringBase(SQLModel):
     description: str | None = None
     status: int = Field(default=0, ge=0, le=2)
 
+    @field_validator("lat", "lng")
+    @classmethod
+    def round_coordinates(cls, v: float) -> float:
+        return round(v, 6)
+
 
 class GatheringCreate(GatheringBase):
     @field_validator("vibe")
@@ -365,6 +370,11 @@ class GatheringUpdate(SQLModel):
     vibe: list[VibeTag] | None = None
     description: str | None = None
     status: int | None = Field(default=None, ge=0, le=2)
+
+    @field_validator("lat", "lng", mode="before")
+    @classmethod
+    def round_coordinates(cls, v: float | None) -> float | None:
+        return round(v, 6) if v is not None else None
 
     @field_validator("vibe")
     @classmethod
@@ -427,3 +437,17 @@ class UserPreferencesPublic(SQLModel):
     core_summary: str | None
     recent_summary: str | None
     updated_at: datetime | None
+
+
+class GatheringRecommendPublic(GatheringPublic):
+    match_percentage: float  # 0.0 ~ 100.0
+
+
+class GatheringsRecommendPublic(SQLModel):
+    data: list[GatheringRecommendPublic]
+    count: int
+
+
+class ChatResponse(SQLModel):
+    message: ChatMessagePublic
+    recommendations: list[GatheringRecommendPublic] | None = None
