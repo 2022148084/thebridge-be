@@ -34,6 +34,7 @@ def read_gatherings(
     city: str | None = None,
     status: int | None = None,
 ) -> Any:
+    _ = current_user
     query = select(Gathering)
     if sport_type:
         query = query.where(Gathering.sport_type == sport_type)
@@ -52,6 +53,7 @@ def read_gatherings(
 def read_gathering(
     session: SessionDep, current_user: CurrentUser, id: uuid.UUID
 ) -> Any:
+    _ = current_user
     gathering = session.get(Gathering, id)
     if not gathering:
         raise HTTPException(status_code=404, detail="Gathering not found")

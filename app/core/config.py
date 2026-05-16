@@ -62,4 +62,4 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str = "changethis"
 
 
-settings = Settings()  # type: ignore
+settings = Settings()

@@ -1,13 +1,14 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from pgvector.sqlalchemy import Vector
 from pydantic import EmailStr, field_validator
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
-from typing import Literal
 
 VECTOR_DIM = 1536
+
 
 def get_datetime_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -81,6 +82,58 @@ class UserPublic(UserBase):
 
 class UsersPublic(SQLModel):
     data: list[UserPublic]
+    count: int
+
+
+FriendshipStatus = Literal["pending", "accepted"]
+
+
+class Friendship(SQLModel, table=True):
+    __tablename__ = "friendship"
+    __table_args__ = (
+        UniqueConstraint("user_id", "friend_id", name="friendship_user_friend_key"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    friend_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    status: str = Field(default="pending", max_length=20, index=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    responded_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class FriendshipPublic(SQLModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    friend_id: uuid.UUID
+    status: FriendshipStatus
+    created_at: datetime | None = None
+    responded_at: datetime | None = None
+
+
+class FriendsPublic(SQLModel):
+    data: list[UserPublic]
+    count: int
+
+
+class FriendRequestPublic(SQLModel):
+    id: uuid.UUID
+    requester: UserPublic
+    created_at: datetime | None = None
+
+
+class FriendRequestsPublic(SQLModel):
+    data: list[FriendRequestPublic]
     count: int
 
 

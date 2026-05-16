@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlmodel import col, delete, func, select
 
 from app import crud
@@ -12,6 +13,7 @@ from app.api.deps import (
 )
 from app.core.security import get_password_hash, verify_password
 from app.models import (
+    Friendship,
     Item,
     Message,
     UpdatePassword,
@@ -150,6 +152,55 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
     user_create = UserCreate.model_validate(user_in)
     user = crud.create_user(session=session, user_create=user_create)
     return user
+
+
+@router.get("/search", response_model=UsersPublic)
+def search_users(
+    session: SessionDep,
+    current_user: CurrentUser,
+    q: str,
+    skip: int = 0,
+    limit: int = 20,
+) -> Any:
+    query_text = q.strip()
+    if not query_text:
+        raise HTTPException(status_code=400, detail="Search query cannot be empty")
+
+    limit = min(limit, 50)
+    search_pattern = f"%{query_text}%"
+    sent_relation_user_ids = select(Friendship.friend_id).where(
+        col(Friendship.user_id) == current_user.id,
+        col(Friendship.status).in_(["pending", "accepted"]),
+    )
+    received_relation_user_ids = select(Friendship.user_id).where(
+        col(Friendship.friend_id) == current_user.id,
+        col(Friendship.status).in_(["pending", "accepted"]),
+    )
+    query = (
+        select(User)
+        .where(col(User.is_active))
+        .where(col(User.id) != current_user.id)
+        .where(col(User.id).not_in(sent_relation_user_ids))
+        .where(col(User.id).not_in(received_relation_user_ids))
+        .where(
+            or_(
+                col(User.full_name).ilike(search_pattern),
+                col(User.email).ilike(search_pattern),
+            )
+        )
+    )
+
+    count = session.exec(select(func.count()).select_from(query.subquery())).one()
+    users = session.exec(
+        query.order_by(col(User.full_name).asc(), col(User.email).asc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
+
+    return UsersPublic(
+        data=[UserPublic.model_validate(user) for user in users],
+        count=count,
+    )
 
 
 @router.get("/{user_id}", response_model=UserPublic)
