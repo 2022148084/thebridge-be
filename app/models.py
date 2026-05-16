@@ -1,9 +1,12 @@
 import uuid
 from datetime import datetime, timezone
 
+from pgvector.sqlalchemy import Vector
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, Relationship, SQLModel
+
+VECTOR_DIM = 1536
 
 
 def get_datetime_utc() -> datetime:
@@ -136,3 +139,115 @@ class Token(SQLModel):
 # Contents of JWT token
 class TokenPayload(SQLModel):
     sub: str | None = None
+
+
+# ── New domain models ──────────────────────────────────────────────────────────
+
+
+class Location(SQLModel, table=True):
+    __tablename__ = "location"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(max_length=255)
+    city: str = Field(max_length=255)
+    lat: float
+    lng: float
+
+
+class ChatLog(SQLModel, table=True):
+    __tablename__ = "chat_log"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    role: str = Field(max_length=50)
+    message: str
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class UserPreferences(SQLModel, table=True):
+    __tablename__ = "user_preferences"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    core_summary: str | None = None
+    core_embedding: list[float] | None = Field(
+        default=None, sa_column=Column(Vector(VECTOR_DIM), nullable=True)
+    )
+    recent_summary: str | None = None
+    recent_embedding: list[float] | None = Field(
+        default=None, sa_column=Column(Vector(VECTOR_DIM), nullable=True)
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class Gathering(SQLModel, table=True):
+    __tablename__ = "gathering"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    host_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    location_id: uuid.UUID = Field(foreign_key="location.id", nullable=False, ondelete="CASCADE")
+    sport_type: str = Field(max_length=100)
+    starts_at: datetime = Field(sa_type=DateTime(timezone=True))  # type: ignore
+    duration_min: int
+    max_participants: int
+    level: str = Field(max_length=50)
+    vibe: str = Field(max_length=100)
+    description: str | None = None
+    description_embedding: list[float] | None = Field(
+        default=None, sa_column=Column(Vector(VECTOR_DIM), nullable=True)
+    )
+    status: int = Field(default=0)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class Participant(SQLModel, table=True):
+    __tablename__ = "participant"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(foreign_key="gathering.id", nullable=False, ondelete="CASCADE")
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    status: str = Field(max_length=50)
+    joined_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class MatchScore(SQLModel, table=True):
+    __tablename__ = "match_score"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(foreign_key="gathering.id", nullable=False, ondelete="CASCADE")
+    user_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    score: float
+    calculated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class Review(SQLModel, table=True):
+    __tablename__ = "review"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(foreign_key="gathering.id", nullable=False, ondelete="CASCADE")
+    reviewer_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    rating: int
+    comment: str | None = None
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
