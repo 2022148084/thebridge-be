@@ -15,6 +15,17 @@ services:
     volumes:
       - app-db-data:/var/lib/postgresql/data
 
+  # 운영 환경에도 Redis 추가!
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+      timeout: 5s
+
   backend:
     build:
       context: .
@@ -31,10 +42,14 @@ services:
       FIRST_SUPERUSER: ${FIRST_SUPERUSER:?FIRST_SUPERUSER is required}
       FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD:?FIRST_SUPERUSER_PASSWORD is required}
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["https://thebridge.hsh-server.com"]}
-      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}  # OCI 4코어시라면 4로 올리셔도 좋습니다
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0} # Redis URL 추가!
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy # 의존성 추가!
     ports:
       - "127.0.0.1:8000:8000"
 

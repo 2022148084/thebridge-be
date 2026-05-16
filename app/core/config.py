@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str = "changethis"
 
     GEMINI_API_KEY: str = ""
+    REDIS_URL: str = "redis://localhost:6379/0"
 
 
 settings = Settings()
