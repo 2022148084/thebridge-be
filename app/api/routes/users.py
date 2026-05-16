@@ -15,10 +15,13 @@ from app.core.security import get_password_hash, verify_password
 from app.models import (
     Friendship,
     Item,
+    LocationsMapPublic,
     Message,
     UpdatePassword,
     User,
     UserCreate,
+    UserLocationPublic,
+    UserLocationUpdate,
     UserPublic,
     UserRegister,
     UsersPublic,
@@ -92,6 +95,54 @@ def update_user_me(
     session.commit()
     session.refresh(current_user)
     return current_user
+
+
+@router.patch("/me/location", response_model=UserPublic)
+def update_user_location(
+    *, session: SessionDep, location_in: UserLocationUpdate, current_user: CurrentUser
+) -> Any:
+    """Update current user's GPS location."""
+    current_user.lat = location_in.lat
+    current_user.lng = location_in.lng
+    current_user.updated_at = get_datetime_utc()
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+
+@router.get("/me/location", response_model=LocationsMapPublic)
+def get_location_map(*, session: SessionDep, current_user: CurrentUser) -> Any:
+    """Get current user's location and all accepted friends' locations."""
+    me = UserLocationPublic(
+        id=current_user.id,
+        full_name=current_user.full_name,
+        avatar_index=current_user.avatar_index,
+        lat=current_user.lat,
+        lng=current_user.lng,
+    )
+    friendships = session.exec(
+        select(Friendship).where(
+            col(Friendship.status) == "accepted",
+            or_(
+                col(Friendship.user_id) == current_user.id,
+                col(Friendship.friend_id) == current_user.id,
+            ),
+        )
+    ).all()
+    friends = []
+    for fs in friendships:
+        other_id = fs.friend_id if fs.user_id == current_user.id else fs.user_id
+        other = session.get(User, other_id)
+        if other:
+            friends.append(UserLocationPublic(
+                id=other.id,
+                full_name=other.full_name,
+                avatar_index=other.avatar_index,
+                lat=other.lat,
+                lng=other.lng,
+            ))
+    return LocationsMapPublic(me=me, friends=friends)
 
 
 @router.patch("/me/password", response_model=Message)

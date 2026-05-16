@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.services import gemini
 from app.services.gemini import compute_weighted_embedding
+from app.services.geo import haversine_km
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -269,14 +270,15 @@ def send_message(
         summary = prefs.core_summary or prefs.recent_summary or ""
         preferred_sports = gemini.extract_preferred_sports(summary)
         distance_col = Gathering.description_embedding.cosine_distance(user_vec).label("distance")
-        rows = session.exec(
+        stmt = (
             select(Gathering, distance_col)
             .where(Gathering.description_embedding.isnot(None))
             .where(Gathering.status == 0)
             .where(Gathering.host_id != current_user.id)
-            .order_by(distance_col.asc())
-            .limit(3)
-        ).all()
+        )
+        if current_user.lat is not None and current_user.lng is not None:
+            stmt = stmt.where(haversine_km(current_user.lat, current_user.lng) <= 2.0)
+        rows = session.exec(stmt.order_by(distance_col.asc()).limit(3)).all()
         if rows:
             recs = []
             for g, dist in rows:

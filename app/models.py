@@ -24,6 +24,15 @@ class UserBase(SQLModel):
     sex: int | None = Field(default=None, ge=0, le=2)
     city: str | None = Field(default=None, max_length=255)
     avatar_index: int | None = Field(default=None, ge=0)
+    lat: float | None = None
+    lng: float | None = None
+
+    @field_validator("lat", "lng")
+    @classmethod
+    def round_coordinates(cls, v: float | None) -> float | None:
+        if v is None:
+            return None
+        return round(v, 6)
 
 
 # Properties to receive via API on creation
@@ -54,6 +63,29 @@ class UserUpdateMe(SQLModel):
     sex: int | None = Field(default=None, ge=0, le=2)
     city: str | None = Field(default=None, max_length=255)
     avatar_index: int | None = Field(default=None, ge=0)
+
+
+class UserLocationUpdate(SQLModel):
+    lat: float
+    lng: float
+
+    @field_validator("lat", "lng")
+    @classmethod
+    def round_coordinates(cls, v: float) -> float:
+        return round(v, 6)
+
+
+class UserLocationPublic(SQLModel):
+    id: uuid.UUID
+    full_name: str | None = None
+    avatar_index: int | None = None
+    lat: float | None = None
+    lng: float | None = None
+
+
+class LocationsMapPublic(SQLModel):
+    me: UserLocationPublic
+    friends: list[UserLocationPublic]
 
 
 class UpdatePassword(SQLModel):
