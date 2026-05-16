@@ -16,6 +16,8 @@ from app.models import (
     Message,
     Participant,
     ParticipantPublic,
+    ParticipatingGatheringPublic,
+    ParticipatingGatheringsPublic,
     UserPreferences,
     get_datetime_utc,
 )
@@ -27,6 +29,17 @@ router = APIRouter(prefix="/gatherings", tags=["gatherings"])
 
 def _to_public(g: Gathering) -> GatheringPublic:
     return GatheringPublic.model_validate(g)
+
+
+def _to_participating_public(
+    gathering: Gathering, participant: Participant
+) -> ParticipatingGatheringPublic:
+    return ParticipatingGatheringPublic(
+        **_to_public(gathering).model_dump(),
+        participant_id=participant.id,
+        participant_status=participant.status,
+        joined_at=participant.joined_at,
+    )
 
 
 def _refresh_description_and_embedding(g: Gathering) -> tuple[str, list[float]]:
@@ -118,6 +131,41 @@ def read_gatherings(
         query.order_by(col(Gathering.starts_at).asc()).offset(skip).limit(limit)
     ).all()
     return GatheringsPublic(data=[_to_public(g) for g in gatherings], count=count)
+
+
+@router.get("/me/participating", response_model=ParticipatingGatheringsPublic)
+def read_my_participating_gatherings(
+    session: SessionDep,
+    current_user: CurrentUser,
+    skip: int = 0,
+    limit: int = 100,
+) -> Any:
+    active_participant_statuses = ["pending", "joined"]
+    base_filters = (
+        col(Participant.user_id) == current_user.id,
+        col(Participant.status).in_(active_participant_statuses),
+    )
+    count = session.exec(
+        select(func.count())
+        .select_from(Gathering)
+        .join(Participant, col(Participant.session_id) == col(Gathering.id))
+        .where(*base_filters)
+    ).one()
+    rows = session.exec(
+        select(Gathering, Participant)
+        .join(Participant, col(Participant.session_id) == col(Gathering.id))
+        .where(*base_filters)
+        .order_by(col(Gathering.starts_at).asc())
+        .offset(skip)
+        .limit(limit)
+    ).all()
+    return ParticipatingGatheringsPublic(
+        data=[
+            _to_participating_public(gathering, participant)
+            for gathering, participant in rows
+        ],
+        count=count,
+    )
 
 
 @router.get("/{id}", response_model=GatheringPublic)

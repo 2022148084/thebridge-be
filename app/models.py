@@ -416,6 +416,17 @@ class GatheringsPublic(SQLModel):
     count: int
 
 
+class ParticipatingGatheringPublic(GatheringPublic):
+    participant_id: uuid.UUID
+    participant_status: str
+    joined_at: datetime | None
+
+
+class ParticipatingGatheringsPublic(SQLModel):
+    data: list[ParticipatingGatheringPublic]
+    count: int
+
+
 # ── Chat & Preferences API schemas ────────────────────────────────────────────
 
 class ChatMessageInput(SQLModel):
