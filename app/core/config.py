@@ -61,5 +61,7 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER: EmailStr = "admin@example.com"
     FIRST_SUPERUSER_PASSWORD: str = "changethis"
 
+    GEMINI_API_KEY: str = ""
+
 
 settings = Settings()

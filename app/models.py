@@ -400,3 +400,26 @@ class GatheringPublic(SQLModel):
 class GatheringsPublic(SQLModel):
     data: list[GatheringPublic]
     count: int
+
+
+# ── Chat & Preferences API schemas ────────────────────────────────────────────
+
+class ChatMessageInput(SQLModel):
+    message: str
+
+
+class ChatMessagePublic(SQLModel):
+    id: uuid.UUID
+    role: str
+    message: str
+    created_at: datetime | None
+
+
+class ChatHistoryPublic(SQLModel):
+    data: list[ChatMessagePublic]
+
+
+class UserPreferencesPublic(SQLModel):
+    core_summary: str | None
+    recent_summary: str | None
+    updated_at: datetime | None

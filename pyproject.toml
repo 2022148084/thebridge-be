@@ -17,6 +17,7 @@ dependencies = [
     "pyjwt<3.0.0,>=2.8.0",
     "pwdlib[argon2,bcrypt]>=0.3.0",
     "pgvector>=0.3.0",
+    "google-genai>=1.0.0",
 ]
 
 [dependency-groups]
