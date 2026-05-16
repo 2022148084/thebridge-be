@@ -22,6 +22,7 @@ from app.models import (
     UsersPublic,
     UserUpdate,
     UserUpdateMe,
+    get_datetime_utc,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -82,6 +83,8 @@ def update_user_me(
                 status_code=409, detail="User with this email already exists"
             )
     user_data = user_in.model_dump(exclude_unset=True)
+    if user_data:
+        user_data["updated_at"] = get_datetime_utc()
     current_user.sqlmodel_update(user_data)
     session.add(current_user)
     session.commit()
@@ -105,6 +108,7 @@ def update_password_me(
         )
     hashed_password = get_password_hash(body.new_password)
     current_user.hashed_password = hashed_password
+    current_user.updated_at = get_datetime_utc()
     session.add(current_user)
     session.commit()
     return Message(message="Password updated successfully")

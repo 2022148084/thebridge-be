@@ -16,6 +16,9 @@ class UserBase(SQLModel):
     is_active: bool = True
     is_superuser: bool = False
     full_name: str | None = Field(default=None, max_length=255)
+    age: int | None = None
+    sex: int | None = Field(default=None, ge=0, le=2)
+    city: str | None = Field(default=None, max_length=255)
 
 
 # Properties to receive via API on creation
@@ -27,6 +30,9 @@ class UserRegister(SQLModel):
     email: EmailStr = Field(max_length=255)
     password: str = Field(min_length=8, max_length=128)
     full_name: str | None = Field(default=None, max_length=255)
+    age: int | None = None
+    sex: int | None = Field(default=None, ge=0, le=2)
+    city: str | None = Field(default=None, max_length=255)
 
 
 # Properties to receive via API on update, all are optional
@@ -38,6 +44,9 @@ class UserUpdate(UserBase):
 class UserUpdateMe(SQLModel):
     full_name: str | None = Field(default=None, max_length=255)
     email: EmailStr | None = Field(default=None, max_length=255)
+    age: int | None = None
+    sex: int | None = Field(default=None, ge=0, le=2)
+    city: str | None = Field(default=None, max_length=255)
 
 
 class UpdatePassword(SQLModel):
@@ -53,6 +62,10 @@ class User(UserBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
     items: list["Item"] = Relationship(back_populates="owner", cascade_delete=True)
 
 
@@ -60,6 +73,7 @@ class User(UserBase, table=True):
 class UserPublic(UserBase):
     id: uuid.UUID
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class UsersPublic(SQLModel):
@@ -122,4 +136,3 @@ class Token(SQLModel):
 # Contents of JWT token
 class TokenPayload(SQLModel):
     sub: str | None = None
-
