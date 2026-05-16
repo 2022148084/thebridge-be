@@ -244,6 +244,7 @@ class Gathering(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     host_id: uuid.UUID = Field(foreign_key="user.id", nullable=False, ondelete="CASCADE")
+    title: str = Field(max_length=255)
     place_name: str = Field(max_length=255)
     city: str = Field(max_length=50)
     lat: float
@@ -326,6 +327,7 @@ VibeTag = Literal["quiet pace", "social energy", "locked in", "reset mode"]
 
 
 class GatheringBase(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
     place_name: str = Field(max_length=255)
     city: str = Field(max_length=50)
     lat: float
@@ -350,6 +352,7 @@ class GatheringCreate(GatheringBase):
 
 
 class GatheringUpdate(SQLModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
     place_name: str | None = Field(default=None, max_length=255)
     city: str | None = Field(default=None, max_length=50)
     lat: float | None = None
@@ -374,6 +377,7 @@ class GatheringUpdate(SQLModel):
 class GatheringPublic(SQLModel):
     id: uuid.UUID
     host_id: uuid.UUID
+    title: str
     place_name: str
     city: str
     lat: float
