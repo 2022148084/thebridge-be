@@ -44,6 +44,7 @@ services:
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["https://thebridge.hsh-server.com"]}
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}  # OCI 4코어시라면 4로 올리셔도 좋습니다
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_RPM_LIMIT: ${GEMINI_RPM_LIMIT:-500}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0} # Redis URL 추가!
     depends_on:
       db:

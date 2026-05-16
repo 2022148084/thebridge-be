@@ -1,10 +1,12 @@
 import math
+from typing import cast
 
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
 from app.models import ChatLog
+from app.services.rate_limit import enforce_gemini_rpm_limit
 
 _EMBED_MODEL = "gemini-embedding-2"
 
@@ -70,18 +72,22 @@ def _client() -> genai.Client:
 
 def chat(history: list[ChatLog], user_message: str) -> str:
     client = _client()
-    gemini_history = [
-        types.Content(
-            role="user" if log.role == "user" else "model",
-            parts=[types.Part(text=log.message)],
-        )
-        for log in history
-    ]
+    gemini_history = cast(
+        list[types.ContentOrDict],
+        [
+            types.Content(
+                role="user" if log.role == "user" else "model",
+                parts=[types.Part(text=log.message)],
+            )
+            for log in history
+        ],
+    )
     chat_session = client.chats.create(
         model=_MODEL,
         config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
         history=gemini_history,
     )
+    enforce_gemini_rpm_limit()
     response = chat_session.send_message(user_message)
     return response.text or ""
 
@@ -89,10 +95,10 @@ def chat(history: list[ChatLog], user_message: str) -> str:
 def generate_recent_summary(messages: list[ChatLog]) -> str:
     client = _client()
     conversation = "\n".join(
-        f"{'User' if m.role == 'user' else 'Assistant'}: {m.message}"
-        for m in messages
+        f"{'User' if m.role == 'user' else 'Assistant'}: {m.message}" for m in messages
     )
     prompt = SUMMARY_PROMPT_TEMPLATE.format(conversation=conversation)
+    enforce_gemini_rpm_limit()
     response = client.models.generate_content(model=_MODEL, contents=prompt)
     return (response.text or "").strip()
 
@@ -100,6 +106,7 @@ def generate_recent_summary(messages: list[ChatLog]) -> str:
 def merge_summaries(core: str, recent: str) -> str:
     client = _client()
     prompt = MERGE_PROMPT_TEMPLATE.format(core=core, recent=recent)
+    enforce_gemini_rpm_limit()
     response = client.models.generate_content(model=_MODEL, contents=prompt)
     return (response.text or "").strip()
 
@@ -126,7 +133,9 @@ def generate_gathering_description(
     user_description: str | None = None,
 ) -> str:
     client = _client()
-    user_desc_line = f"- Additional context: {user_description}" if user_description else ""
+    user_desc_line = (
+        f"- Additional context: {user_description}" if user_description else ""
+    )
     prompt = GATHERING_DESC_PROMPT.format(
         city=city,
         place_name=place_name,
@@ -137,20 +146,31 @@ def generate_gathering_description(
         max_participants=max_participants,
         user_desc_line=user_desc_line,
     )
+    enforce_gemini_rpm_limit()
     response = client.models.generate_content(model=_MODEL, contents=prompt)
     return (response.text or "").strip()
 
 
 def generate_embedding(text: str) -> list[float]:
     client = _client()
+    enforce_gemini_rpm_limit()
     result = client.models.embed_content(
         model=_EMBED_MODEL,
         contents=text,
     )
-    return list(result.embeddings[0].values)
+    values = result.embeddings[0].values if result.embeddings else []
+    return list(values or [])
 
 
-_SPORT_TYPES = {"running", "cycling", "yoga", "stretching", "dancing", "walking", "hiking"}
+_SPORT_TYPES = {
+    "running",
+    "cycling",
+    "yoga",
+    "stretching",
+    "dancing",
+    "walking",
+    "hiking",
+}
 
 
 def extract_preferred_sports(summary: str) -> list[str]:
@@ -166,7 +186,7 @@ def compute_weighted_embedding(
 ) -> list[float]:
     weighted = [
         core_weight * c + recent_weight * r
-        for c, r in zip(core_emb, recent_emb)
+        for c, r in zip(core_emb, recent_emb, strict=False)
     ]
     norm = math.sqrt(sum(x * x for x in weighted))
     return [x / norm for x in weighted] if norm > 0 else weighted
