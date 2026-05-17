@@ -181,8 +181,8 @@ def extract_preferred_sports(summary: str) -> list[str]:
 def compute_weighted_embedding(
     core_emb: list[float],
     recent_emb: list[float],
-    core_weight: float = 0.4,
-    recent_weight: float = 0.6,
+    core_weight: float = 0.3,
+    recent_weight: float = 0.7,
 ) -> list[float]:
     weighted = [
         core_weight * c + recent_weight * r
