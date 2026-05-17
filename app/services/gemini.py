@@ -55,10 +55,10 @@ Rules:
 - Don't repeat the same point twice
 - Keep only what's relevant and specific
 
-Existing summary (older):
+Existing summary (all past sessions):
 {core}
 
-Latest summary (newer):
+Latest summary (last 3 messages only):
 {recent}
 
 Merged summary:"""
@@ -181,8 +181,8 @@ def extract_preferred_sports(summary: str) -> list[str]:
 def compute_weighted_embedding(
     core_emb: list[float],
     recent_emb: list[float],
-    core_weight: float = 0.3,
-    recent_weight: float = 0.7,
+    core_weight: float = 0.2,
+    recent_weight: float = 0.8,
 ) -> list[float]:
     weighted = [
         core_weight * c + recent_weight * r
